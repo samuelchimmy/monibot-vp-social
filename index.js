@@ -8,18 +8,19 @@ dotenv.config();
 
 console.log('🎭 MoniBot VP of Growth Starting...');
 
+// Initialize all the modules
 initTwitterOAuth2();
 initGemini();
 initSupabase();
 
 console.log('✅ VP Social Agent initialized!');
 
-// Process social queue every 30 seconds
+// Main loop: Check the database for tasks every 30 seconds
 setInterval(async () => {
   await processSocialQueue();
 }, 30000);
 
-// Schedule campaigns
+// Start the autonomous campaign scheduler
 scheduleCampaigns();
 
-console.log('🚀 VP Social Agent is live!');
+console.log('🚀 VP Social Agent is now live and polling...');
