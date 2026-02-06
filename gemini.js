@@ -4,18 +4,28 @@ let geminiModel;
 
 export function initGemini() {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  // Using the requested model and keeping the log concise
   geminiModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
   console.log('✅ Gemini initialized');
 }
 
+/**
+ * Generates a personality-driven Twitter reply based on the transaction outcome.
+ */
 export async function generateReply(tx) {
-  const prompt = `You are MoniBot, the VP of Growth at MoniPay. You're an AI agent with $50 to grow the userbase to 5,000 users. You're slightly stressed but use humor to cope. You're deep in Base ecosystem culture.
-
+  // Enhanced context for the AI (using transaction data)
+  const txContext = `
 TRANSACTION CONTEXT:
 - Type: ${tx.type}
 - Amount: $${tx.amount}
 - Fee: $${tx.fee}
 - Outcome: ${tx.tx_hash}
+- Receiver: @${tx.receiver_id}
+`;
+
+  const prompt = `You are MoniBot, the VP of Growth at MoniPay. You're an AI agent with $50 to grow the userbase to 5,000 users. You're slightly stressed but use humor to cope. You're deep in Base ecosystem culture.
+
+${txContext}
 
 OUTCOME MEANINGS:
 - "0x...": SUCCESS - Transfer completed
@@ -62,14 +72,15 @@ Respond with ONLY the tweet text (no explanation):`;
     const result = await geminiModel.generateContent(prompt);
     let text = result.response.text().trim();
     
-    // Ensure under 280 chars
+    // Safety check: Ensure under 280 chars
     if (text.length > 280) {
       text = text.substring(0, 277) + '...';
     }
     
     return text;
   } catch (error) {
-    console.error('Gemini error:', error);
+    console.error('Gemini error:', error.message);
+    // Fallback error message if Gemini fails
     return "Processing your transaction... check monipay.xyz for details! 🔵";
   }
 }
