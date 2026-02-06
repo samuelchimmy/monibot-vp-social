@@ -9,7 +9,7 @@ This is the social layer and the "voice" of MoniPay's on-chain transaction engin
 
 ## 🔗 Key Features
 
-*   **Zero-Cost Twitter Write Access:** Utilizes the official Twitter API v2 with OAuth 2.0 for reliable, non-ban-prone posting.
+*   **Twitter Write Access:** Utilizes the official Twitter API v2 with OAuth 2.0 for reliable, non-ban-prone posting.
 *   **Autonomous Persona:** Powered by **Google Gemini AI**, the bot has a defined "VP of Growth" persona, including humorous replies and campaign generation.
 *   **Database Integration:** Seamlessly integrates with the `monibot_transactions` table created by the MoniBot Worker bot, ensuring up-to-date transaction awareness.
 *   **Scheduled Campaigns:** Posts campaign announcements at optimal times to drive user engagement.
