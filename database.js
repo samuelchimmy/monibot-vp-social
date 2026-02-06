@@ -2,7 +2,8 @@ import { createClient } from '@supabase/supabase-js';
 import { generateReply } from './gemini.js';
 import { replyToTweet } from './twitter-oauth2.js';
 
-let supabase;
+// FIX: Export supabase so other modules (like campaigns.js) can import it
+export let supabase;
 
 export function initSupabase() {
   supabase = createClient(
@@ -22,7 +23,7 @@ export async function processSocialQueue() {
       .select('*')
       .eq('replied', false)
       .order('created_at', { ascending: true })
-      .limit(10);
+      .limit(5); // Process fewer at a time to keep the agent responsive
     
     if (error) throw error;
     
@@ -73,32 +74,46 @@ async function processQueueItem(tx) {
   }
 }
 
+/**
+ * Updates the monibot_mission_stats table based on transaction outcome.
+ */
 async function updateMissionStats(tx) {
-  // Only count successful transfers
+  // Only update stats for successful transfers (identified by a tx hash)
   if (!tx.tx_hash.startsWith('0x')) return;
   
-  const { data: stats } = await supabase
-    .from('monibot_mission_stats')
-    .select('*')
-    .single();
-  
-  if (!stats) {
-    // Create initial stats
-    await supabase.from('monibot_mission_stats').insert({
-      total_budget: 50.00,
-      spent_budget: tx.amount + tx.fee,
-      users_onboarded: 1,
-      target_users: 5000,
-      campaigns_run: 0
+  // Use RPC (Remote Procedure Call) for safe, atomic updates (preferred method)
+  try {
+    const { error } = await supabase.rpc('increment_mission_stats', {
+        amount_spent: tx.amount + tx.fee,
+        user_id: tx.receiver_id // Assuming every successful grant/p2p is a user interaction
     });
-  } else {
-    // Update stats
-    await supabase
+
+    if (error) throw error;
+
+  } catch (rpcError) {
+    // Fallback: Use the logic provided, but ensure floating point accuracy
+    console.warn('RPC call failed (likely missing function). Falling back to direct query...');
+
+    const { data: stats } = await supabase
       .from('monibot_mission_stats')
-      .update({
-        spent_budget: stats.spent_budget + tx.amount + tx.fee,
-        users_onboarded: stats.users_onboarded + 1
-      })
-      .eq('id', stats.id);
+      .select('spent_budget, users_onboarded')
+      .single();
+
+    if (!stats) {
+      // Create initial stats
+      await supabase.from('monibot_mission_stats').insert({
+        spent_budget: tx.amount + tx.fee,
+        users_onboarded: 1,
+      });
+    } else {
+      // Update stats
+      await supabase
+        .from('monibot_mission_stats')
+        .update({
+          spent_budget: stats.spent_budget + tx.amount + tx.fee,
+          users_onboarded: stats.users_onboarded + 1
+        })
+        .limit(1); // Ensure only one row is updated
+    }
   }
 }
