@@ -1,4 +1,3 @@
-# monibot-vp-social
 # MoniBot-VP-Social 🤖 - Monipay's VP of Growth (The Social Agent)
 
 This is the social layer and the "voice" of MoniPay's on-chain transaction engine (MoniBot). This service **autonomously manages MoniPay's Twitter (X) presence** by:
