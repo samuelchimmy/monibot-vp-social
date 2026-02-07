@@ -15,7 +15,9 @@ import dotenv from 'dotenv';
 import { initTwitterOAuth2 } from './twitter-oauth2.js';
 import { initGemini } from './gemini.js';
 import { initSupabase, processSocialQueue, processScheduledJobs } from './database.js';
-import { scheduleCampaigns } from './campaigns.js';
+
+// Remove cron-based campaigns - now using manual trigger + AI scheduling
+// import { scheduleCampaigns } from './campaigns.js';
 
 dotenv.config();
 
@@ -94,8 +96,10 @@ process.on('SIGTERM', () => {
 
 console.log('🚀 VP-Social is now live!\n');
 
-// Start cron-based campaign scheduler (9am, 4pm EST)
-scheduleCampaigns();
+// Campaign scheduling is now handled via:
+// 1. Manual triggers from the MoniBot Dashboard (monibot-campaign edge function)
+// 2. AI-scheduled jobs stored in scheduled_jobs table
+// The processScheduledJobs loop picks up pending jobs when they're due
 
 // Run immediately, then on intervals
 socialQueueLoop();
@@ -104,4 +108,5 @@ scheduledJobsLoop();
 setInterval(socialQueueLoop, SOCIAL_QUEUE_INTERVAL_MS);
 setInterval(scheduledJobsLoop, SCHEDULED_JOBS_INTERVAL_MS);
 
+console.log('   Campaign triggers: Manual (via Dashboard) + AI-scheduled');
 console.log('   Press Ctrl+C to stop.\n');
