@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { generateReply, generateCampaignAnnouncement, generateWinnerAnnouncement } from './gemini.js';
+import { generateReplyWithBackoff, generateCampaignAnnouncement, generateWinnerAnnouncement } from './gemini.js';
 import { replyToTweet, postTweet } from './twitter-oauth2.js';
 
 export let supabase;
@@ -48,23 +48,33 @@ async function processQueueItem(tx) {
   try {
     console.log(`\n💬 Processing: ${tx.id}`);
     
-    // Generate reply based on tx_hash outcome
-    const replyText = await generateReply(tx);
+    // Generate reply with backoff + fallback for Gemini 429
+    const replyText = await generateReplyWithBackoff(tx);
     
     console.log(`  Reply: ${replyText}`);
     
     // Post reply to Twitter
     if (tx.tweet_id) {
-      await replyToTweet(tx.tweet_id, replyText);
-      console.log(`  ✅ Replied to tweet ${tx.tweet_id}`);
+      try {
+        await replyToTweet(tx.tweet_id, replyText);
+        console.log(`  ✅ Replied to tweet ${tx.tweet_id}`);
+      } catch (twitterError) {
+        // Check for 403 - tweet deleted/not visible
+        if (twitterError.code === 403 || 
+            twitterError.data?.status === 403 ||
+            twitterError.message?.includes('403')) {
+          console.log(`  ⚠️ 403 Error: Tweet ${tx.tweet_id} is deleted/not visible. Skipping & marking done.`);
+          // Mark as replied to prevent infinite retry
+          await markAsReplied(tx.id, 'SKIPPED_403_TWEET_UNAVAILABLE');
+          return;
+        }
+        // Re-throw other errors
+        throw twitterError;
+      }
     }
     
     // Mark as replied
-    await supabase
-      .from('monibot_transactions')
-      .update({ replied: true })
-      .eq('id', tx.id);
-    
+    await markAsReplied(tx.id);
     console.log(`  ✅ Marked as replied`);
     
     // Update mission stats
@@ -72,7 +82,47 @@ async function processQueueItem(tx) {
     
   } catch (error) {
     console.error(`  ❌ Error processing ${tx.id}:`, error);
+    
+    // If it's a persistent error, skip to avoid infinite loop
+    if (shouldSkipTransaction(error)) {
+      console.log(`  ⚠️ Skipping transaction due to persistent error`);
+      await markAsReplied(tx.id, `SKIPPED_ERROR: ${error.message?.substring(0, 50)}`);
+    }
   }
+}
+
+/**
+ * Determine if we should skip a transaction due to unrecoverable error
+ */
+function shouldSkipTransaction(error) {
+  const skipPatterns = [
+    '403',
+    'deleted',
+    'not visible',
+    'Tweet not found',
+    'not authorized'
+  ];
+  
+  const errorStr = JSON.stringify(error).toLowerCase();
+  return skipPatterns.some(pattern => errorStr.includes(pattern.toLowerCase()));
+}
+
+/**
+ * Mark transaction as replied with optional skip reason
+ */
+async function markAsReplied(transactionId, skipReason = null) {
+  const updateData = { replied: true };
+  
+  // Note: If you want to store skip reason, add a column to monibot_transactions
+  // For now, we just log it
+  if (skipReason) {
+    console.log(`  Skip reason: ${skipReason}`);
+  }
+  
+  await supabase
+    .from('monibot_transactions')
+    .update(updateData)
+    .eq('id', transactionId);
 }
 
 // ============ Scheduled Jobs Processing ============
@@ -84,6 +134,9 @@ async function processQueueItem(tx) {
 export async function processScheduledJobs() {
   try {
     console.log('⏰ Checking Scheduled Jobs...');
+    
+    // First, check for pending jobs that are now due
+    await processReadyPendingJobs();
     
     // Get completed jobs that haven't been socially processed yet
     const { data: jobs, error } = await supabase
@@ -106,13 +159,62 @@ export async function processScheduledJobs() {
       // Check if job result indicates it's ready for social posting
       const result = job.result || {};
       
-      if (result.ready_for_social) {
+      if (result.ready_for_social && !result.social_posted) {
         await processScheduledJob(job);
       }
     }
     
   } catch (error) {
     console.error('Error processing scheduled jobs:', error);
+  }
+}
+
+/**
+ * Process pending jobs that are now due (scheduled_at <= now)
+ */
+async function processReadyPendingJobs() {
+  const now = new Date().toISOString();
+  
+  const { data: pendingJobs, error } = await supabase
+    .from('scheduled_jobs')
+    .select('*')
+    .eq('status', 'pending')
+    .eq('type', 'campaign_post')
+    .lte('scheduled_at', now)
+    .order('scheduled_at', { ascending: true })
+    .limit(3);
+  
+  if (error) {
+    console.error('Error fetching pending jobs:', error);
+    return;
+  }
+  
+  if (!pendingJobs || pendingJobs.length === 0) {
+    return;
+  }
+  
+  console.log(`  📅 Found ${pendingJobs.length} pending job(s) ready to execute`);
+  
+  for (const job of pendingJobs) {
+    // Mark as started
+    await supabase
+      .from('scheduled_jobs')
+      .update({ 
+        status: 'completed',
+        started_at: new Date().toISOString(),
+        completed_at: new Date().toISOString(),
+        result: {
+          ready_for_social: true,
+          triggered_by: 'scheduler'
+        }
+      })
+      .eq('id', job.id);
+    
+    // Process immediately
+    await processScheduledJob({
+      ...job,
+      result: { ready_for_social: true }
+    });
   }
 }
 
@@ -190,7 +292,7 @@ async function handleCampaignPost(job) {
   const tweetId = await postTweet(tweetText);
   console.log(`  ✅ Campaign posted: ${tweetId}`);
   
-  // Log to campaigns table
+  // Log campaign to database
   await supabase.from('campaigns').insert({
     tweet_id: tweetId,
     message: tweetText,
@@ -229,8 +331,19 @@ async function handleRandomPickAnnouncement(job) {
   // Post as reply to original tweet or as new tweet
   let tweetId;
   if (source_tweet_id) {
-    tweetId = await replyToTweet(source_tweet_id, announcementText);
-    console.log(`  ✅ Winner announcement replied: ${tweetId}`);
+    try {
+      tweetId = await replyToTweet(source_tweet_id, announcementText);
+      console.log(`  ✅ Winner announcement replied: ${tweetId}`);
+    } catch (error) {
+      // If reply fails (tweet deleted), post as standalone
+      if (error.code === 403 || error.data?.status === 403) {
+        console.log('  ⚠️ Original tweet unavailable, posting as standalone');
+        tweetId = await postTweet(announcementText);
+        console.log(`  ✅ Winner announcement posted: ${tweetId}`);
+      } else {
+        throw error;
+      }
+    }
   } else {
     tweetId = await postTweet(announcementText);
     console.log(`  ✅ Winner announcement posted: ${tweetId}`);
