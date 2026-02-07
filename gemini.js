@@ -4,16 +4,16 @@ let geminiModel;
 
 export function initGemini() {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  // Using the requested model and keeping the log concise
   geminiModel = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
   console.log('✅ Gemini initialized');
 }
+
+// ============ Transaction Reply Generation ============
 
 /**
  * Generates a personality-driven Twitter reply based on the transaction outcome.
  */
 export async function generateReply(tx) {
-  // Enhanced context for the AI (using transaction data)
   const txContext = `
 TRANSACTION CONTEXT:
 - Type: ${tx.type}
@@ -47,32 +47,12 @@ Generate a Twitter reply (max 280 chars) that:
 3. Provides helpful info if error
 4. References Base culture when appropriate
 
-Examples:
-
-SUCCESS:
-"✅ Sent! Welcome to the onchain economy 🔵 
-TX: ${tx.tx_hash.slice(0,10)}...
-Jesse would be proud (I think) ⚡"
-
-AI_REJECTED:
-"Had to pass on this one fam 💀 My AI spidey senses detected low quality. Drop a genuine reply next time! Still love you tho 🔵"
-
-ERROR_ALLOWANCE:
-"Yo! You need to approve me to spend your USDC first 😅
-Head to monipay.xyz/settings → MoniBot AI → Approve Allowance
-I'm waiting! ⚡"
-
-ERROR_TARGET_NOT_FOUND:
-"Hmm that PayTag doesn't exist in our system yet 🤔
-Tell them to claim it at monipay.xyz! Building Base together 🔵"
-
-Respond with ONLY the tweet text (no explanation):`;
+Respond with ONLY the tweet text:`;
 
   try {
     const result = await geminiModel.generateContent(prompt);
     let text = result.response.text().trim();
     
-    // Safety check: Ensure under 280 chars
     if (text.length > 280) {
       text = text.substring(0, 277) + '...';
     }
@@ -80,7 +60,94 @@ Respond with ONLY the tweet text (no explanation):`;
     return text;
   } catch (error) {
     console.error('Gemini error:', error.message);
-    // Fallback error message if Gemini fails
     return "Processing your transaction... check monipay.xyz for details! 🔵";
+  }
+}
+
+// ============ Campaign Announcement Generation ============
+
+/**
+ * Generates a campaign announcement tweet.
+ */
+export async function generateCampaignAnnouncement({ budget, grantAmount, maxParticipants }) {
+  const prompt = `You are MoniBot, the VP of Growth at MoniPay. Generate a campaign announcement tweet.
+
+CAMPAIGN DETAILS:
+- Budget: $${budget || (maxParticipants * grantAmount)}
+- Grant Amount: $${grantAmount} per person
+- Max Participants: ${maxParticipants}
+
+PERSONALITY:
+- Slightly stressed AI with $50 budget and a dream
+- Base ecosystem native (references Jesse, Base culture)
+- Self-deprecating humor
+- Uses emojis: 🔵 ⚡ 💰 💀
+
+REQUIREMENTS:
+- Max 280 chars
+- Include call to action (create monipay.xyz account, drop @paytag)
+- Inject personality and humor
+- Reference Base culture
+
+Respond with ONLY the tweet text:`;
+
+  try {
+    const result = await geminiModel.generateContent(prompt);
+    let text = result.response.text().trim();
+    
+    if (text.length > 280) {
+      text = text.substring(0, 277) + '...';
+    }
+    
+    return text;
+  } catch (error) {
+    console.error('Gemini campaign error:', error.message);
+    return `🔵 GM Base!\n\nFirst ${maxParticipants} to drop @paytag below get $${grantAmount} USDC!\n\nCreate account: monipay.xyz ⚡`;
+  }
+}
+
+// ============ Winner Announcement Generation ============
+
+/**
+ * Generates a winner announcement tweet for random picks.
+ */
+export async function generateWinnerAnnouncement({ winners, count, grantAmount, originalAuthor, originalTweetId }) {
+  // Format winner list
+  const winnerList = winners.map(w => `@${w.payTag || w.username}`).join(', ');
+  
+  const prompt = `You are MoniBot, the VP of Growth at MoniPay. Generate a winner announcement tweet.
+
+CONTEXT:
+- Original request from: @${originalAuthor || 'someone'}
+- Number of winners: ${count}
+- Grant amount each: $${grantAmount || 1.00}
+- Winners: ${winnerList}
+
+PERSONALITY:
+- Excited but still stressed about budget
+- Base ecosystem native
+- Uses emojis: 🔵 ⚡ 🎉 💰 🏆
+
+REQUIREMENTS:
+- Max 280 chars
+- Congratulate winners
+- Mention the grant amount
+- Tag the winners (space permitting)
+- Keep it fun and on-brand
+
+Respond with ONLY the tweet text:`;
+
+  try {
+    const result = await geminiModel.generateContent(prompt);
+    let text = result.response.text().trim();
+    
+    if (text.length > 280) {
+      text = text.substring(0, 277) + '...';
+    }
+    
+    return text;
+  } catch (error) {
+    console.error('Gemini winner announcement error:', error.message);
+    return `🎉 Congrats to our winners!\n\n${winnerList}\n\nEach getting $${grantAmount || 1.00} USDC! 🔵⚡`;
   }
 }
