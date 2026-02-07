@@ -1,6 +1,5 @@
 import { TwitterApi } from 'twitter-api-v2';
-// We need the database to store and retrieve the Refresh Token
-import { supabase } from './database.js'; 
+import { supabase } from './database.js';
 
 let twitterClient;
 
@@ -8,7 +7,6 @@ let twitterClient;
  * Retrieves the stored Refresh Token from the database.
  */
 async function getStoredRefreshToken() {
-  // Assuming you created the 'bot_settings' table
   const { data } = await supabase
     .from('bot_settings')
     .select('value')
@@ -40,22 +38,18 @@ export async function initTwitterOAuth2() {
     return;
   }
 
-  // Create a temporary client with the refresh token and client credentials
   const tempClient = new TwitterApi({
     clientId: process.env.TWITTER_CLIENT_ID,
     clientSecret: process.env.TWITTER_CLIENT_SECRET,
   });
 
   try {
-    // Attempt to refresh the token
     const { client: refreshedClient, refreshToken: newRefreshToken } = await tempClient.refreshOAuth2Token(refreshToken);
-
-    // Update the global client and save the new refresh token
+    
     twitterClient = refreshedClient;
     await updateStoredRefreshToken(newRefreshToken);
-
+    
     console.log('✅ Twitter OAuth 2.0 initialized and token refreshed.');
-
   } catch (error) {
     console.error('❌ ERROR: Failed to refresh Twitter token. Check credentials and token validity.', error.message);
   }
@@ -66,6 +60,7 @@ export async function initTwitterOAuth2() {
  */
 export async function postTweet(text) {
   if (!twitterClient) throw new Error('Twitter client not initialized or failed to authenticate.');
+  
   try {
     const result = await twitterClient.v2.tweet(text);
     return result.data.id;
@@ -80,6 +75,7 @@ export async function postTweet(text) {
  */
 export async function replyToTweet(tweetId, text) {
   if (!twitterClient) throw new Error('Twitter client not initialized or failed to authenticate.');
+  
   try {
     const result = await twitterClient.v2.tweet(text, { reply: { in_reply_to_tweet_id: tweetId } });
     return result.data.id;
