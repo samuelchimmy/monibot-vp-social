@@ -121,13 +121,15 @@ async function callMoniBotAI(action, context) {
  */
 export async function generateReplyWithBackoff(tx) {
   const result = await callMoniBotAI('generate-reply', tx);
-  
-  if (result) {
-    return result;
+
+  const baseText = result || getRandomFallback(getTemplateTypeFromTx(tx));
+
+  // Include tx hash as plain text on success - users can verify at basescan.org
+  if (tx?.tx_hash && String(tx.tx_hash).startsWith('0x')) {
+    return `${baseText}\n\nCheck your MoniPay account or scan this tx at basescan dot org:\n${tx.tx_hash}`;
   }
-  
-  // Use fallback
-  return getRandomFallback(getTemplateTypeFromTx(tx));
+
+  return baseText;
 }
 
 /**
