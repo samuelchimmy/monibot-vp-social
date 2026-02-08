@@ -3,6 +3,74 @@ import { supabase } from './database.js';
 
 let twitterClient;
 
+// ============ Rate Limit Logging ============
+
+/**
+ * Logs Twitter API rate limit information
+ */
+function logRateLimits(endpoint, rateLimit) {
+  if (!rateLimit) {
+    console.log(`📊 [${endpoint}] Rate limit info not available`);
+    return;
+  }
+  
+  const remaining = rateLimit.remaining;
+  const limit = rateLimit.limit;
+  const resetTime = rateLimit.reset ? new Date(rateLimit.reset * 1000) : null;
+  const resetIn = resetTime ? Math.round((resetTime - Date.now()) / 1000 / 60) : '?';
+  
+  const emoji = remaining <= 5 ? '🔴' : remaining <= 15 ? '🟡' : '🟢';
+  
+  console.log(`📊 [${endpoint}] Rate Limit: ${emoji} ${remaining}/${limit} remaining | Resets in ${resetIn} min`);
+  
+  if (remaining <= 5) {
+    console.warn(`⚠️ WARNING: Very low rate limit on ${endpoint}! Only ${remaining} requests left.`);
+  }
+}
+
+/**
+ * Logs detailed Twitter API errors with rate limit context
+ */
+function logTwitterError(operation, error) {
+  console.error(`\n❌ Twitter API Error in ${operation}:`);
+  console.error(`   Message: ${error.message}`);
+  
+  // Log error code and data
+  if (error.code) console.error(`   Code: ${error.code}`);
+  if (error.data) {
+    console.error(`   Data:`, JSON.stringify(error.data, null, 2));
+  }
+  
+  // Check for rate limit errors (429)
+  if (error.code === 429 || error.data?.status === 429 || error.message?.includes('429')) {
+    console.error(`   🚫 RATE LIMITED! Too many requests.`);
+    
+    if (error.rateLimit) {
+      const resetTime = error.rateLimit.reset ? new Date(error.rateLimit.reset * 1000) : null;
+      const resetIn = resetTime ? Math.round((resetTime - Date.now()) / 1000 / 60) : '?';
+      console.error(`   ⏰ Resets in: ${resetIn} minutes`);
+      console.error(`   📈 Limit: ${error.rateLimit.limit}, Remaining: ${error.rateLimit.remaining}`);
+    }
+  }
+  
+  // Check for auth errors
+  if (error.code === 401 || error.code === 403) {
+    console.error(`   🔐 Authentication/Authorization issue. Check tokens.`);
+  }
+  
+  // Log headers if available (contains rate limit info)
+  if (error.headers) {
+    const rateLimitHeaders = {
+      limit: error.headers['x-rate-limit-limit'],
+      remaining: error.headers['x-rate-limit-remaining'],
+      reset: error.headers['x-rate-limit-reset'],
+    };
+    if (rateLimitHeaders.limit) {
+      console.error(`   📊 Headers Rate Limit: ${rateLimitHeaders.remaining}/${rateLimitHeaders.limit}`);
+    }
+  }
+}
+
 /**
  * Retrieves the stored Refresh Token from the database.
  */
@@ -63,9 +131,10 @@ export async function postTweet(text) {
   
   try {
     const result = await twitterClient.v2.tweet(text);
+    logRateLimits('POST /tweets', result.rateLimit);
     return result.data.id;
   } catch (error) {
-    console.error('Twitter Post Error:', error.message);
+    logTwitterError('postTweet', error);
     throw error;
   }
 }
@@ -78,9 +147,10 @@ export async function replyToTweet(tweetId, text) {
   
   try {
     const result = await twitterClient.v2.tweet(text, { reply: { in_reply_to_tweet_id: tweetId } });
+    logRateLimits('POST /tweets (reply)', result.rateLimit);
     return result.data.id;
   } catch (error) {
-    console.error('Twitter Reply Error:', error.message);
+    logTwitterError('replyToTweet', error);
     throw error;
   }
 }
