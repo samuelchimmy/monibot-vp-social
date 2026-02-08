@@ -16,31 +16,80 @@ export function initGemini() {
   console.log('✅ MoniBot AI initialized (using Lovable AI Edge Function)');
 }
 
-// ============ Fallback Templates ============
+// ============ Complete Fallback Templates (v3.0) ============
 
 const FALLBACK_TEMPLATES = {
+  // Successful transaction
   success: [
     "✅ Transfer complete! Welcome to the MoniPay fam 🔵⚡",
     "Done! Your USDC just landed. Based move 🔵💰",
     "Transfer confirmed ⚡ You're officially onchain with MoniPay!",
     "Sent! 💸 Another successful transaction on Base 🔵",
+    "USDC delivered! 🎯 That's how we do it on Base",
   ],
+  
+  // Insufficient allowance
   error_allowance: [
     "⚠️ Need to set up your MoniBot allowance first! Check your MoniPay account settings 🔧",
     "Looks like you need to approve spending first. Check your MoniBot settings in your MoniPay account! 🔵",
+    "Set up your allowance in MoniPay Settings → MoniBot to enable social payments 💰",
   ],
+  
+  // Insufficient balance
   error_balance: [
     "📉 Not enough USDC! Fund your MoniPay account first 💰",
     "Insufficient balance! Top up your MoniPay wallet and try again 🔵",
+    "Need more USDC fren! Fund your wallet and come back 💸",
   ],
+  
+  // Target not found
   error_target: [
     "🔍 Couldn't find that PayTag. Double-check and try again!",
     "PayTag not found! Make sure they have a MoniPay account 🔵",
+    "Hmm, can't find that user. Are they on MoniPay? 🤔",
   ],
-  ai_rejected: [
-    "🤖 This one didn't pass the vibe check. Keep it real! 💀",
-    "AI says no on this one. Try a more genuine interaction! 🔵",
+  
+  // Campaign limit reached (funny "too late" replies)
+  limit_reached: [
+    "😅 Too late fren! Campaign's full. Next time be faster! 🏃‍♂️💨",
+    "Campaign's done! You missed it by *this* much 💀 Follow for the next one!",
+    "All slots taken! You'll catch the next wave 🌊🔵",
+    "Bruh you just missed it 😭 Set alerts for next time!",
+    "The early bird gets the USDC... and you're not a bird rn 🐦💤",
+    "RIP to your timing 💀 Campaign filled up! Better luck next drop",
+    "Oof, campaign's at max capacity! But hey, stick around 👀",
+    "You snooze you lose fren 😴 But there's always more!",
   ],
+  
+  // Blockchain/network error
+  error_blockchain: [
+    "⚠️ Blockchain hiccup! Our engineers are on it. Try again in a bit 🔧",
+    "Network congestion atm. Give it 5 and retry 🔵",
+    "Tech gremlins struck 🔧 We're on it! Try again shortly",
+    "Temporary network issue - should clear up soon! ⚡",
+  ],
+  
+  // Duplicate grant attempt
+  error_duplicate_grant: [
+    "You already claimed this one fren! One per campaign 🎯",
+    "Nice try but you already got yours! 😎",
+    "Already in your wallet from this campaign! Check your balance 💰",
+  ],
+  
+  // Treasury empty
+  error_treasury_empty: [
+    "🏦 Campaign funds are depleted! Check back for the next one",
+    "Treasury's empty for this campaign - you'll catch the next drop! 🔵",
+    "Campaign budget exhausted! More coming soon 💰",
+  ],
+  
+  // Max retries exceeded
+  max_retries: [
+    "We had trouble processing this one. Check your MoniPay account for details! 🔵",
+    "Something went sideways, but your account will show the status 💰",
+  ],
+  
+  // Default fallback
   default: [
     "Processing... check your MoniPay account for details! 🔵",
     "Transaction processed! Check your MoniPay account for the full story 💰",
@@ -54,12 +103,21 @@ function getRandomFallback(type) {
 
 function getTemplateTypeFromTx(tx) {
   const outcome = tx.tx_hash || '';
+  const status = tx.status || '';
   
+  // Check status first
+  if (status === 'limit_reached') return 'limit_reached';
+  
+  // Check tx_hash for error codes
   if (outcome.startsWith('0x')) return 'success';
-  if (outcome.includes('AI_REJECTED')) return 'ai_rejected';
-  if (outcome.includes('ERROR_ALLOWANCE')) return 'error_allowance';
-  if (outcome.includes('ERROR_BALANCE')) return 'error_balance';
-  if (outcome.includes('ERROR_TARGET')) return 'error_target';
+  if (outcome === 'LIMIT_REACHED') return 'limit_reached';
+  if (outcome === 'ERROR_ALLOWANCE') return 'error_allowance';
+  if (outcome === 'ERROR_BALANCE') return 'error_balance';
+  if (outcome === 'ERROR_TARGET_NOT_FOUND') return 'error_target';
+  if (outcome === 'ERROR_DUPLICATE_GRANT') return 'error_duplicate_grant';
+  if (outcome === 'ERROR_TREASURY_EMPTY') return 'error_treasury_empty';
+  if (outcome.includes('ERROR_BLOCKCHAIN')) return 'error_blockchain';
+  if (outcome.includes('MAX_RETRIES')) return 'max_retries';
   
   return 'default';
 }
@@ -118,15 +176,28 @@ async function callMoniBotAI(action, context) {
 
 /**
  * Generates a reply with fallback for errors.
+ * Includes recipient info for personalization.
  */
 export async function generateReplyWithBackoff(tx) {
-  const result = await callMoniBotAI('generate-reply', tx);
+  // Build context with both payer and recipient info
+  const context = {
+    ...tx,
+    recipient_tag: tx.recipient_pay_tag || 'unknown',
+    payer_tag: tx.payer_pay_tag || 'MoniBot',
+    type: tx.type || 'grant',
+    status: tx.status || 'completed'
+  };
+  
+  const result = await callMoniBotAI('generate-reply', context);
 
   const baseText = result || getRandomFallback(getTemplateTypeFromTx(tx));
 
   // Include tx hash as plain text on success - users can verify at basescan.org
   if (tx?.tx_hash && String(tx.tx_hash).startsWith('0x')) {
-    return `${baseText}\n\nCheck your MoniPay account or scan this tx at basescan dot org:\n${tx.tx_hash}`;
+    // Personalize with recipient if available
+    const recipientMention = tx.recipient_pay_tag ? `@${tx.recipient_pay_tag}` : '';
+    const prefix = recipientMention ? `${recipientMention} ` : '';
+    return `${prefix}${baseText}\n\nVerify at basescan dot org:\n${tx.tx_hash}`;
   }
 
   return baseText;
@@ -156,7 +227,7 @@ export async function generateCampaignAnnouncement({ budget, grantAmount, maxPar
   }
   
   // Use fallback
-  return `🔵 GM Base!\n\nFirst ${maxParticipants} to drop @paytag below get $${grantAmount} USDC!\n\nCreate your MoniPay account to claim! ⚡`;
+  return `🔵 GM Base!\n\nFirst ${maxParticipants} to drop their @paytag below get $${grantAmount} USDC!\n\nCreate your MoniPay account to claim! ⚡`;
 }
 
 // ============ Winner Announcement Generation ============
