@@ -11,6 +11,8 @@ const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIs
 let lastQuotaError = 0;
 let backoffMs = 0;
 
+// NOTE: No silent skip codes - VP-Social replies to EVERYTHING once, then moves on
+
 export function initGemini() {
   // No longer using Gemini directly - using Lovable AI via Edge Function
   console.log('✅ MoniBot AI initialized (using Lovable AI Edge Function)');
@@ -42,11 +44,11 @@ const FALLBACK_TEMPLATES = {
     "Need more USDC fren! Fund your wallet and come back 💸",
   ],
   
-  // Target not found
+  // Target monitag not found
   error_target: [
-    "🔍 Couldn't find that PayTag. Double-check and try again!",
-    "PayTag not found! Make sure they have a MoniPay account 🔵",
-    "Hmm, can't find that user. Are they on MoniPay? 🤔",
+    "🔍 Monitag not found! Double-check and try again",
+    "Monitag not found! Make sure they have a MoniPay account 🔵",
+    "Hmm, can't find that monitag. Are they on MoniPay? 🤔",
   ],
   
   // Campaign limit reached (funny "too late" replies)
@@ -89,6 +91,40 @@ const FALLBACK_TEMPLATES = {
     "Something went sideways, but your account will show the status 💰",
   ],
   
+  // ============ Reply-All Templates (every tweet gets a response) ============
+  
+  // No valid monitag mentioned in the reply
+  skip_no_paytag: [
+    "Drop your @monitag to claim! Create a MoniPay account if you don't have one 🔵",
+    "Need your @monitag to send you USDC! Set one up at MoniPay ⚡",
+    "Reply with your @monitag to claim! 💰",
+  ],
+  
+  // Campaign inactive
+  skip_campaign_inactive: [
+    "This campaign has ended! Follow @MoniBot for the next one 🔵",
+    "Campaign's wrapped up! Stay tuned for more drops ⚡",
+  ],
+  
+  // Already granted (DB or on-chain)
+  skip_duplicate: [
+    "You already got yours from this campaign! Check your MoniPay account 💰",
+    "One per person fren! You've already claimed 🎯",
+    "Already sent to you earlier! Check your balance 🔵",
+  ],
+  
+  // Invalid P2P syntax (couldn't parse amount or target)
+  skip_invalid_syntax: [
+    "Couldn't parse that command! Format: @MoniBot send $5 to @monitag 🔵",
+    "Hmm, didn't catch that. Try: send $X to @monitag ⚡",
+  ],
+  
+  // Sender not registered in MoniPay (P2P)
+  skip_sender_not_found: [
+    "You need a MoniPay account first! Create your @monitag to send USDC 🔵",
+    "Create your MoniPay account to use social payments! ⚡",
+  ],
+  
   // Default fallback
   default: [
     "Processing... check your MoniPay account for details! 🔵",
@@ -108,7 +144,7 @@ function getTemplateTypeFromTx(tx) {
   // Check status first
   if (status === 'limit_reached') return 'limit_reached';
   
-  // Check tx_hash for error codes
+  // Check tx_hash for error/skip codes
   if (outcome.startsWith('0x')) return 'success';
   if (outcome === 'LIMIT_REACHED') return 'limit_reached';
   if (outcome === 'ERROR_ALLOWANCE') return 'error_allowance';
@@ -118,6 +154,15 @@ function getTemplateTypeFromTx(tx) {
   if (outcome === 'ERROR_TREASURY_EMPTY') return 'error_treasury_empty';
   if (outcome.includes('ERROR_BLOCKCHAIN')) return 'error_blockchain';
   if (outcome.includes('MAX_RETRIES')) return 'max_retries';
+  
+  // Reply-All codes (these used to be silent, now they get replies)
+  if (outcome === 'SKIP_NO_PAYTAG') return 'skip_no_paytag';
+  if (outcome === 'SKIP_CAMPAIGN_INACTIVE') return 'skip_campaign_inactive';
+  if (outcome === 'SKIP_DUPLICATE_GRANT_DB') return 'skip_duplicate';
+  if (outcome === 'SKIP_DUPLICATE_GRANT_ONCHAIN') return 'skip_duplicate';
+  if (outcome === 'SKIP_ALREADY_ONCHAIN') return 'skip_duplicate';
+  if (outcome === 'SKIP_INVALID_SYNTAX') return 'skip_invalid_syntax';
+  if (outcome === 'ERROR_SENDER_NOT_FOUND') return 'skip_sender_not_found';
   
   return 'default';
 }
@@ -227,7 +272,7 @@ export async function generateCampaignAnnouncement({ budget, grantAmount, maxPar
   }
   
   // Use fallback
-  return `🔵 GM Base!\n\nFirst ${maxParticipants} to drop their @paytag below get $${grantAmount} USDC!\n\nCreate your MoniPay account to claim! ⚡`;
+  return `🔵 GM Base!\n\nFirst ${maxParticipants} to drop their @monitag below get $${grantAmount} USDC!\n\nCreate your MoniPay account to claim! ⚡`;
 }
 
 // ============ Winner Announcement Generation ============
