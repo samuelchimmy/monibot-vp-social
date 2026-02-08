@@ -1,7 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { generateReplyWithBackoff, generateCampaignAnnouncement, generateWinnerAnnouncement } from './gemini.js';
 import { replyToTweet, postTweet } from './twitter-oauth2.js';
-import { replyToTweet, postTweet } from './twitter-oauth2.js';
 
 export let supabase;
 
