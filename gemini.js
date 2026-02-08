@@ -95,14 +95,14 @@ const FALLBACK_TEMPLATES = {
   
   // No valid monitag mentioned in the reply
   skip_no_paytag: [
-    "Drop your @monitag to claim! Create a MoniPay account if you don't have one 🔵",
-    "Need your @monitag to send you USDC! Set one up at MoniPay ⚡",
-    "Reply with your @monitag to claim! 💰",
+    "Drop your monitag to claim! Create a MoniPay account if you don't have one 🔵",
+    "Need your monitag to send! Set one up at MoniPay ⚡",
+    "Reply with your monitag to claim! 💰",
   ],
   
   // Campaign inactive
   skip_campaign_inactive: [
-    "This campaign has ended! Follow @MoniBot for the next one 🔵",
+    "This campaign has ended! Follow MoniBot for the next one 🔵",
     "Campaign's wrapped up! Stay tuned for more drops ⚡",
   ],
   
@@ -115,13 +115,13 @@ const FALLBACK_TEMPLATES = {
   
   // Invalid P2P syntax (couldn't parse amount or target)
   skip_invalid_syntax: [
-    "Couldn't parse that command! Format: @MoniBot send $5 to @monitag 🔵",
-    "Hmm, didn't catch that. Try: send $X to @monitag ⚡",
+    "Couldn't parse that command! Format: MoniBot send $5 to monitag 🔵",
+    "Hmm, didn't catch that. Try: send $X to monitag ⚡",
   ],
   
   // Sender not registered in MoniPay (P2P)
   skip_sender_not_found: [
-    "You need a MoniPay account first! Create your @monitag to send USDC 🔵",
+    "You need a MoniPay account first! Create your monitag to send USDC 🔵",
     "Create your MoniPay account to use social payments! ⚡",
   ],
   
@@ -229,7 +229,7 @@ export async function generateReplyWithBackoff(tx) {
     ...tx,
     recipient_tag: tx.recipient_pay_tag || 'unknown',
     payer_tag: tx.payer_pay_tag || 'MoniBot',
-    type: tx.type || 'grant',
+    type: tx.type || 'p2p_command',
     status: tx.status || 'completed'
   };
   
@@ -237,12 +237,13 @@ export async function generateReplyWithBackoff(tx) {
 
   const baseText = result || getRandomFallback(getTemplateTypeFromTx(tx));
 
-  // Include tx hash as plain text on success - users can verify at basescan.org
+  // Include shortened tx hash on success - no URLs, no @ mentions
   if (tx?.tx_hash && String(tx.tx_hash).startsWith('0x')) {
-    // Personalize with recipient if available
-    const recipientMention = tx.recipient_pay_tag ? `@${tx.recipient_pay_tag}` : '';
-    const prefix = recipientMention ? `${recipientMention} ` : '';
-    return `${prefix}${baseText}\n\nVerify at basescan dot org:\n${tx.tx_hash}`;
+    // Use "monitag: name" format (no @), shorten tx hash
+    const recipientLabel = tx.recipient_pay_tag ? `monitag: ${tx.recipient_pay_tag}` : '';
+    const shortHash = tx.tx_hash.substring(0, 18) + '...';
+    const suffix = recipientLabel ? ` → ${recipientLabel}` : '';
+    return `${baseText}${suffix}\n\nTx: ${shortHash}`;
   }
 
   return baseText;
@@ -271,8 +272,8 @@ export async function generateCampaignAnnouncement({ budget, grantAmount, maxPar
     return result;
   }
   
-  // Use fallback
-  return `🔵 GM Base!\n\nFirst ${maxParticipants} to drop their @monitag below get $${grantAmount} USDC!\n\nCreate your MoniPay account to claim! ⚡`;
+  // Use fallback - no @ mentions
+  return `🔵 GM Base!\n\nFirst ${maxParticipants} to drop their monitag below get $${grantAmount} USDC!\n\nCreate your MoniPay account to claim! ⚡`;
 }
 
 // ============ Winner Announcement Generation ============
