@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
-import { generateReplyWithBackoff, generateCampaignAnnouncement, generateWinnerAnnouncement, shouldSkipReply } from './gemini.js';
+import { generateReplyWithBackoff, generateCampaignAnnouncement, generateWinnerAnnouncement } from './gemini.js';
+import { replyToTweet, postTweet } from './twitter-oauth2.js';
 import { replyToTweet, postTweet } from './twitter-oauth2.js';
 
 export let supabase;
@@ -56,14 +57,7 @@ async function processQueueItem(tx) {
     console.log(`\n💬 Processing: ${tx.id.substring(0, 8)} | ${tx.type} | ${tx.tx_hash.substring(0, 20)}...`);
     console.log(`   Retry count: ${tx.retry_count || 0}/${MAX_RETRY_COUNT}`);
     
-    // Check if this is a silent skip code (no Twitter reply needed)
-    if (shouldSkipReply(tx.tx_hash)) {
-      console.log(`   🔇 Silent skip code detected: ${tx.tx_hash}. Marking as replied without posting.`);
-      await markAsReplied(tx.id, `SILENT_SKIP: ${tx.tx_hash}`);
-      return;
-    }
-    
-    // Generate reply with backoff + fallback for AI errors
+    // Generate reply for ALL transaction types (no silent skips)
     const replyText = await generateReplyWithBackoff(tx);
     
     console.log(`   Reply: ${replyText.substring(0, 100)}...`);
