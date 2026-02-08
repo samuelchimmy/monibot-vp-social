@@ -4,6 +4,9 @@ import { replyToTweet, postTweet } from './twitter-oauth2.js';
 
 export let supabase;
 
+// Maximum retry attempts before skipping a transaction
+const MAX_RETRY_COUNT = 3;
+
 export function initSupabase() {
   supabase = createClient(
     process.env.SUPABASE_URL,
@@ -18,11 +21,12 @@ export async function processSocialQueue() {
   try {
     console.log('📬 Checking Social Queue...');
     
-    // Get unreplied transactions
+    // Get unreplied transactions that haven't exceeded retry limit
     const { data: queue, error } = await supabase
       .from('monibot_transactions')
       .select('*')
       .eq('replied', false)
+      .lt('retry_count', MAX_RETRY_COUNT) // Only get transactions under retry limit
       .order('created_at', { ascending: true })
       .limit(5);
     
@@ -39,6 +43,9 @@ export async function processSocialQueue() {
       await processQueueItem(tx);
     }
     
+    // Also clean up any transactions that exceeded retry limit
+    await cleanupExceededRetries();
+    
   } catch (error) {
     console.error('Error processing queue:', error);
   }
@@ -46,48 +53,99 @@ export async function processSocialQueue() {
 
 async function processQueueItem(tx) {
   try {
-    console.log(`\n💬 Processing: ${tx.id}`);
+    console.log(`\n💬 Processing: ${tx.id.substring(0, 8)} | ${tx.type} | ${tx.tx_hash.substring(0, 20)}...`);
+    console.log(`   Retry count: ${tx.retry_count || 0}/${MAX_RETRY_COUNT}`);
     
     // Generate reply with backoff + fallback for Gemini 429
     const replyText = await generateReplyWithBackoff(tx);
     
-    console.log(`  Reply: ${replyText}`);
+    console.log(`   Reply: ${replyText.substring(0, 100)}...`);
     
     // Post reply to Twitter
     if (tx.tweet_id) {
       try {
         await replyToTweet(tx.tweet_id, replyText);
-        console.log(`  ✅ Replied to tweet ${tx.tweet_id}`);
+        console.log(`   ✅ Replied to tweet ${tx.tweet_id}`);
       } catch (twitterError) {
         // Check for 403 - tweet deleted/not visible
         if (twitterError.code === 403 || 
             twitterError.data?.status === 403 ||
             twitterError.message?.includes('403')) {
-          console.log(`  ⚠️ 403 Error: Tweet ${tx.tweet_id} is deleted/not visible. Skipping & marking done.`);
-          // Mark as replied to prevent infinite retry
+          console.log(`   ⚠️ 403 Error: Tweet ${tx.tweet_id} is deleted/not visible. Skipping & marking done.`);
           await markAsReplied(tx.id, 'SKIPPED_403_TWEET_UNAVAILABLE');
           return;
         }
-        // Re-throw other errors
+        
+        // Increment retry count and re-throw
+        await incrementRetryCount(tx.id);
         throw twitterError;
       }
     }
     
     // Mark as replied
     await markAsReplied(tx.id);
-    console.log(`  ✅ Marked as replied`);
+    console.log(`   ✅ Marked as replied`);
     
     // Update mission stats
     await updateMissionStats(tx);
     
   } catch (error) {
-    console.error(`  ❌ Error processing ${tx.id}:`, error);
+    console.error(`   ❌ Error processing ${tx.id}:`, error.message);
     
-    // If it's a persistent error, skip to avoid infinite loop
+    // Check if we should skip this transaction
     if (shouldSkipTransaction(error)) {
-      console.log(`  ⚠️ Skipping transaction due to persistent error`);
+      console.log(`   ⚠️ Skipping transaction due to unrecoverable error`);
       await markAsReplied(tx.id, `SKIPPED_ERROR: ${error.message?.substring(0, 50)}`);
+    } else {
+      // Increment retry count for recoverable errors
+      await incrementRetryCount(tx.id);
     }
+  }
+}
+
+/**
+ * Increment the retry count for a transaction
+ */
+async function incrementRetryCount(transactionId) {
+  const { error } = await supabase
+    .from('monibot_transactions')
+    .update({ retry_count: supabase.raw('retry_count + 1') })
+    .eq('id', transactionId);
+  
+  if (error) {
+    // Fallback to manual increment
+    const { data: tx } = await supabase
+      .from('monibot_transactions')
+      .select('retry_count')
+      .eq('id', transactionId)
+      .single();
+    
+    if (tx) {
+      await supabase
+        .from('monibot_transactions')
+        .update({ retry_count: (tx.retry_count || 0) + 1 })
+        .eq('id', transactionId);
+    }
+  }
+}
+
+/**
+ * Clean up transactions that have exceeded retry limit
+ */
+async function cleanupExceededRetries() {
+  const { data: exceededTx, error } = await supabase
+    .from('monibot_transactions')
+    .select('id')
+    .eq('replied', false)
+    .gte('retry_count', MAX_RETRY_COUNT)
+    .limit(10);
+  
+  if (error || !exceededTx || exceededTx.length === 0) return;
+  
+  console.log(`   🧹 Cleaning up ${exceededTx.length} transaction(s) that exceeded retry limit`);
+  
+  for (const tx of exceededTx) {
+    await markAsReplied(tx.id, 'MAX_RETRIES_EXCEEDED');
   }
 }
 
@@ -100,7 +158,9 @@ function shouldSkipTransaction(error) {
     'deleted',
     'not visible',
     'Tweet not found',
-    'not authorized'
+    'not authorized',
+    'You are not allowed to reply',
+    'blocked'
   ];
   
   const errorStr = JSON.stringify(error).toLowerCase();
@@ -111,12 +171,14 @@ function shouldSkipTransaction(error) {
  * Mark transaction as replied with optional skip reason
  */
 async function markAsReplied(transactionId, skipReason = null) {
-  const updateData = { replied: true };
+  const updateData = { 
+    replied: true 
+  };
   
-  // Note: If you want to store skip reason, add a column to monibot_transactions
-  // For now, we just log it
+  // Store skip reason in error_reason column
   if (skipReason) {
-    console.log(`  Skip reason: ${skipReason}`);
+    updateData.error_reason = skipReason;
+    console.log(`   Skip reason: ${skipReason}`);
   }
   
   await supabase
@@ -220,7 +282,7 @@ async function processReadyPendingJobs() {
 
 async function processScheduledJob(job) {
   try {
-    console.log(`\n📢 Processing scheduled job: ${job.type} (${job.id})`);
+    console.log(`\n📢 Processing scheduled job: ${job.type} (${job.id.substring(0, 8)})`);
     
     let tweetId = null;
     
@@ -234,7 +296,7 @@ async function processScheduledJob(job) {
         break;
       
       default:
-        console.log(`  ⏭️ Unknown job type: ${job.type}`);
+        console.log(`   ⏭️ Unknown job type: ${job.type}`);
         return;
     }
     
@@ -251,10 +313,10 @@ async function processScheduledJob(job) {
       })
       .eq('id', job.id);
     
-    console.log(`  ✅ Job ${job.id} socially processed`);
+    console.log(`   ✅ Job ${job.id.substring(0, 8)} socially processed`);
     
   } catch (error) {
-    console.error(`  ❌ Error processing job ${job.id}:`, error);
+    console.error(`   ❌ Error processing job ${job.id}:`, error);
     
     // Log error but don't fail - will retry on next cycle
     await supabase
@@ -290,7 +352,7 @@ async function handleCampaignPost(job) {
   
   // Post the campaign tweet
   const tweetId = await postTweet(tweetText);
-  console.log(`  ✅ Campaign posted: ${tweetId}`);
+  console.log(`   ✅ Campaign posted: ${tweetId}`);
   
   // Log campaign to database
   await supabase.from('campaigns').insert({
@@ -315,7 +377,7 @@ async function handleRandomPickAnnouncement(job) {
   const { winners = [], count, grant_amount } = result;
   
   if (winners.length === 0) {
-    console.log('  ⚠️ No winners to announce');
+    console.log('   ⚠️ No winners to announce');
     return null;
   }
   
@@ -333,20 +395,20 @@ async function handleRandomPickAnnouncement(job) {
   if (source_tweet_id) {
     try {
       tweetId = await replyToTweet(source_tweet_id, announcementText);
-      console.log(`  ✅ Winner announcement replied: ${tweetId}`);
+      console.log(`   ✅ Winner announcement replied: ${tweetId}`);
     } catch (error) {
       // If reply fails (tweet deleted), post as standalone
       if (error.code === 403 || error.data?.status === 403) {
-        console.log('  ⚠️ Original tweet unavailable, posting as standalone');
+        console.log('   ⚠️ Original tweet unavailable, posting as standalone');
         tweetId = await postTweet(announcementText);
-        console.log(`  ✅ Winner announcement posted: ${tweetId}`);
+        console.log(`   ✅ Winner announcement posted: ${tweetId}`);
       } else {
         throw error;
       }
     }
   } else {
     tweetId = await postTweet(announcementText);
-    console.log(`  ✅ Winner announcement posted: ${tweetId}`);
+    console.log(`   ✅ Winner announcement posted: ${tweetId}`);
   }
   
   return tweetId;
