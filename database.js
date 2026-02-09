@@ -160,7 +160,8 @@ function shouldSkipTransaction(error) {
     'Tweet not found',
     'not authorized',
     'You are not allowed to reply',
-    'blocked'
+    'blocked',
+    'duplicate'
   ];
   
   const errorStr = JSON.stringify(error).toLowerCase();
@@ -211,7 +212,7 @@ export async function processScheduledJobs() {
     if (error) throw error;
     
     if (!jobs || jobs.length === 0) {
-      console.log('  No pending social jobs');
+      console.log('  Queue empty'); // Fixed log message to match screenshot style
       return;
     }
     
@@ -221,7 +222,8 @@ export async function processScheduledJobs() {
       // Check if job result indicates it's ready for social posting
       const result = job.result || {};
       
-      if (result.ready_for_social && !result.social_posted) {
+      // We check !result.social_posted AND !result.social_skipped
+      if (result.ready_for_social && !result.social_posted && !result.social_skipped) {
         await processScheduledJob(job);
       }
     }
@@ -267,7 +269,8 @@ async function processReadyPendingJobs() {
         completed_at: new Date().toISOString(),
         result: {
           ready_for_social: true,
-          triggered_by: 'scheduler'
+          triggered_by: 'scheduler',
+          social_retry_count: 0 // Initialize retry count
         }
       })
       .eq('id', job.id);
@@ -275,7 +278,7 @@ async function processReadyPendingJobs() {
     // Process immediately
     await processScheduledJob({
       ...job,
-      result: { ready_for_social: true }
+      result: { ready_for_social: true, social_retry_count: 0 }
     });
   }
 }
@@ -317,18 +320,52 @@ async function processScheduledJob(job) {
     
   } catch (error) {
     console.error(`   ❌ Error processing job ${job.id}:`, error);
+
+    // ============ FIX: STOP INFINITE LOOP ============
     
-    // Log error but don't fail - will retry on next cycle
-    await supabase
-      .from('scheduled_jobs')
-      .update({
-        result: {
-          ...job.result,
-          social_error: error.message,
-          social_error_at: new Date().toISOString()
-        }
-      })
-      .eq('id', job.id);
+    // Detect Duplicate (403) or "Forbidden" errors
+    const isDuplicate = 
+      error.code === 403 || 
+      error.data?.status === 403 ||
+      (error.data?.detail && error.data.detail.includes('duplicate')) ||
+      (error.message && error.message.includes('duplicate'));
+
+    // Check retry count
+    const currentRetries = job.result?.social_retry_count || 0;
+    const maxRetries = 3;
+
+    // If it's a duplicate or we've tried too many times, MARK AS POSTED/FAILED to stop loop
+    if (isDuplicate || currentRetries >= maxRetries) {
+      console.log(`   🛑 Unrecoverable error (Duplicate or Max Retries). Marking job as finished.`);
+      
+      await supabase
+        .from('scheduled_jobs')
+        .update({
+          result: {
+            ...job.result,
+            social_posted: true, // IMPORTANT: Mark true so the loop skips it
+            social_failed: true,
+            social_error: isDuplicate ? 'Duplicate Content (403)' : 'Max Retries Exceeded',
+            social_error_details: error.message || JSON.stringify(error)
+          }
+        })
+        .eq('id', job.id);
+        
+    } else {
+      // If it's a temporary error, increment retry count but don't mark as posted
+      console.log(`   🔄 Temporary error. Retrying later (${currentRetries + 1}/${maxRetries})...`);
+      
+      await supabase
+        .from('scheduled_jobs')
+        .update({
+          result: {
+            ...job.result,
+            social_retry_count: currentRetries + 1,
+            last_social_error: error.message
+          }
+        })
+        .eq('id', job.id);
+    }
   }
 }
 
