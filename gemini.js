@@ -23,112 +23,111 @@ export function initGemini() {
 const FALLBACK_TEMPLATES = {
   // Successful transaction
   success: [
-    "✅ Transfer complete! Welcome to the MoniPay fam 🔵⚡",
-    "Done! Your USDC just landed. Based move 🔵💰",
-    "Transfer confirmed ⚡ You're officially onchain with MoniPay!",
-    "Sent! 💸 Another successful transaction on Base 🔵",
-    "USDC delivered! 🎯 That's how we do it on Base",
+    "Transfer complete. USDC delivered to your MoniPay wallet.",
+    "Done. Your USDC just landed. Welcome onchain.",
+    "Transfer confirmed. You're officially on Base with MoniPay.",
+    "Sent. Another successful transaction on Base.",
+    "USDC delivered. That's how it works on MoniPay.",
   ],
   
   // Insufficient allowance
   error_allowance: [
-    "⚠️ Need to set up your MoniBot allowance first! Check your MoniPay account settings 🔧",
-    "Looks like you need to approve spending first. Check your MoniBot settings in your MoniPay account! 🔵",
-    "Set up your allowance in MoniPay Settings → MoniBot to enable social payments 💰",
+    "You need to approve your MoniBot spending allowance first. Open MoniPay → Settings → MoniBot and set your allowance.",
+    "Your allowance isn't set up yet. Go to MoniPay → Settings → MoniBot to approve spending.",
+    "Can't process this: no spending allowance found. Set it up in MoniPay under Settings → MoniBot.",
   ],
   
   // Insufficient balance
   error_balance: [
-    "📉 Not enough USDC! Fund your MoniPay account first 💰",
-    "Insufficient balance! Top up your MoniPay wallet and try again 🔵",
-    "Need more USDC fren! Fund your wallet and come back 💸",
+    "Not enough USDC in your wallet. Fund your MoniPay account and try again.",
+    "Insufficient balance. Top up your MoniPay wallet first, then resend.",
+    "Your wallet balance is too low for this transfer. Add USDC to your MoniPay account.",
   ],
   
   // Target monitag not found
   error_target: [
-    "🔍 Monitag not found! Double-check and try again",
-    "Monitag not found! Make sure they have a MoniPay account 🔵",
-    "Hmm, can't find that monitag. Are they on MoniPay? 🤔",
+    "That monitag doesn't exist. Double-check the spelling or ask the recipient to create a MoniPay account.",
+    "Monitag not found. The recipient needs a MoniPay account before you can send to them.",
+    "Can't find that monitag. Make sure they've registered on MoniPay.",
   ],
   
-  // Campaign limit reached (funny "too late" replies)
+  // Campaign limit reached
   limit_reached: [
-    "😅 Too late fren! Campaign's full. Next time be faster! 🏃‍♂️💨",
-    "Campaign's done! You missed it by *this* much 💀 Follow for the next one!",
-    "All slots taken! You'll catch the next wave 🌊🔵",
-    "Bruh you just missed it 😭 Set alerts for next time!",
-    "The early bird gets the USDC... and you're not a bird rn 🐦💤",
-    "RIP to your timing 💀 Campaign filled up! Better luck next drop",
-    "Oof, campaign's at max capacity! But hey, stick around 👀",
-    "You snooze you lose fren 😴 But there's always more!",
+    "Campaign is full. All spots have been claimed. Follow MoniBot for the next one.",
+    "Too late — this campaign already hit its participant limit. Stay tuned for the next drop.",
+    "All slots taken. You'll catch the next campaign.",
+    "Campaign's at capacity. Better luck next time.",
   ],
   
   // Blockchain/network error
   error_blockchain: [
-    "⚠️ Blockchain hiccup! Our engineers are on it. Try again in a bit 🔧",
-    "Network congestion atm. Give it 5 and retry 🔵",
-    "Tech gremlins struck 🔧 We're on it! Try again shortly",
-    "Temporary network issue - should clear up soon! ⚡",
+    "Transaction failed due to a network issue. Try again in a few minutes.",
+    "Temporary blockchain hiccup. Our team is aware. Please retry shortly.",
+    "Network congestion caused this to fail. Wait a moment and try again.",
   ],
   
   // Duplicate grant attempt
   error_duplicate_grant: [
-    "You already claimed this one fren! One per campaign 🎯",
-    "Nice try but you already got yours! 😎",
-    "Already in your wallet from this campaign! Check your balance 💰",
+    "You've already claimed from this campaign. One per person.",
+    "Already sent to you for this campaign. Check your MoniPay balance.",
   ],
   
   // Treasury empty
   error_treasury_empty: [
-    "🏦 Campaign funds are depleted! Check back for the next one",
-    "Treasury's empty for this campaign - you'll catch the next drop! 🔵",
-    "Campaign budget exhausted! More coming soon 💰",
+    "Campaign funds are depleted. Check back for the next one.",
+    "This campaign's budget is exhausted. More drops coming soon.",
   ],
   
   // Max retries exceeded
   max_retries: [
-    "We had trouble processing this one. Check your MoniPay account for details! 🔵",
-    "Something went sideways, but your account will show the status 💰",
+    "We couldn't process this after multiple attempts. Check your MoniPay account for status.",
   ],
-  
-  // ============ Reply-All Templates (every tweet gets a response) ============
   
   // No valid monitag mentioned in the reply
   skip_no_paytag: [
-    "Drop your monitag to claim! Create a MoniPay account if you don't have one 🔵",
-    "Need your monitag to send! Set one up at MoniPay ⚡",
-    "Reply with your monitag to claim! 💰",
+    "Drop your monitag to claim. Need a MoniPay account? Create one first.",
+    "Reply with your monitag to receive. No monitag = no transfer.",
   ],
   
   // Campaign inactive
   skip_campaign_inactive: [
-    "This campaign has ended! Follow MoniBot for the next one 🔵",
-    "Campaign's wrapped up! Stay tuned for more drops ⚡",
+    "This campaign has ended. Follow MoniBot for future drops.",
+    "Campaign's closed. Stay tuned for the next one.",
   ],
   
   // Already granted (DB or on-chain)
   skip_duplicate: [
-    "You already got yours from this campaign! Check your MoniPay account 💰",
-    "One per person fren! You've already claimed 🎯",
-    "Already sent to you earlier! Check your balance 🔵",
+    "You already received from this campaign. Check your MoniPay balance.",
+    "One per person. You've already been sent USDC for this campaign.",
   ],
   
-  // Invalid P2P syntax (couldn't parse amount or target)
+  // Invalid P2P syntax
   skip_invalid_syntax: [
-    "Couldn't parse that command! Format: MoniBot send $5 to monitag 🔵",
-    "Hmm, didn't catch that. Try: send $X to monitag ⚡",
+    "Couldn't parse that. Use: @monibot send $5 to monitag",
+    "Invalid format. Try: @monibot send $X to monitag",
   ],
   
-  // Sender not registered in MoniPay (P2P)
+  // Sender not registered
   skip_sender_not_found: [
-    "You need a MoniPay account first! Create your monitag to send USDC 🔵",
-    "Create your MoniPay account to use social payments! ⚡",
+    "You need a MoniPay account first. Create your monitag to use social payments.",
+    "No MoniPay account found for you. Sign up and link your X account to send USDC.",
+  ],
+  
+  // Multi-recipient batch
+  multi_success: [
+    "Batch transfer complete. All recipients received their USDC.",
+  ],
+  multi_partial: [
+    "Batch partially completed. See details above.",
+  ],
+  multi_failed: [
+    "Batch transfer failed. Check error details above.",
   ],
   
   // Default fallback
   default: [
-    "Processing... check your MoniPay account for details! 🔵",
-    "Transaction processed! Check your MoniPay account for the full story 💰",
+    "Check your MoniPay account for transaction details.",
+    "Transaction processed. See your MoniPay account for the full receipt.",
   ]
 };
 
