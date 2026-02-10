@@ -108,5 +108,14 @@ scheduledJobsLoop();
 setInterval(socialQueueLoop, SOCIAL_QUEUE_INTERVAL_MS);
 setInterval(scheduledJobsLoop, SCHEDULED_JOBS_INTERVAL_MS);
 
+// Auto-restart every 90 minutes to refresh OAuth token
+const AUTO_RESTART_MS = 90 * 60 * 1000;
+setInterval(() => {
+  console.log('\n🔄 Auto-restart for token refresh (90min cycle)...');
+  console.log(`📊 Completed ${socialQueueCycle} social queue cycles, ${scheduledJobsCycle} scheduled job cycles.`);
+  process.exit(0); // Railway auto-restart brings the bot back up
+}, AUTO_RESTART_MS);
+
 console.log('   Campaign triggers: Manual (via Dashboard) + AI-scheduled');
+console.log(`   Auto-restart:      Every 90 minutes`);
 console.log('   Press Ctrl+C to stop.\n');
