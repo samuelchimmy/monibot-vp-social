@@ -107,26 +107,18 @@ async function processQueueItem(tx) {
  * Increment the retry count for a transaction
  */
 async function incrementRetryCount(transactionId) {
-  const { error } = await supabase
+  const { data: tx } = await supabase
     .from('monibot_transactions')
-    .update({ retry_count: supabase.raw('retry_count + 1') })
-    .eq('id', transactionId);
+    .select('retry_count')
+    .eq('id', transactionId)
+    .single();
   
-  if (error) {
-    // Fallback to manual increment
-    const { data: tx } = await supabase
-      .from('monibot_transactions')
-      .select('retry_count')
-      .eq('id', transactionId)
-      .single();
-    
-    if (tx) {
-      await supabase
-        .from('monibot_transactions')
-        .update({ retry_count: (tx.retry_count || 0) + 1 })
-        .eq('id', transactionId);
-    }
-  }
+  const newCount = (tx?.retry_count || 0) + 1;
+  
+  await supabase
+    .from('monibot_transactions')
+    .update({ retry_count: newCount })
+    .eq('id', transactionId);
 }
 
 /**
@@ -469,4 +461,3 @@ async function updateMissionStats(tx) {
     }
   }
 }
-
