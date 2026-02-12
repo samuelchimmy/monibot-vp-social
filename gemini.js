@@ -223,22 +223,39 @@ async function callMoniBotAI(action, context) {
  * Includes recipient info for personalization.
  */
 export async function generateReplyWithBackoff(tx) {
-  // Build context with both payer and recipient info
+  const templateType = getTemplateTypeFromTx(tx);
+  
+  // For error/skip cases, use curated fallback templates directly — they are
+  // more specific and actionable than generic AI responses.
+  if (templateType !== 'success' && templateType !== 'default') {
+    console.log(`  📝 Using curated template for: ${templateType}`);
+    const baseText = getRandomFallback(templateType);
+
+    if (tx?.tx_hash && String(tx.tx_hash).startsWith('0x')) {
+      const recipientLabel = tx.recipient_pay_tag ? `monitag: ${tx.recipient_pay_tag}` : '';
+      const shortHash = tx.tx_hash.substring(0, 18) + '...';
+      const suffix = recipientLabel ? ` → ${recipientLabel}` : '';
+      return `${baseText}${suffix}\n\nTx: ${shortHash}`;
+    }
+
+    return baseText;
+  }
+
+  // For success cases, try AI for a more personalized reply
   const context = {
     ...tx,
     recipient_tag: tx.recipient_pay_tag || 'unknown',
     payer_tag: tx.payer_pay_tag || 'MoniBot',
     type: tx.type || 'p2p_command',
-    status: tx.status || 'completed'
+    status: tx.status || 'completed',
+    template_type: templateType
   };
   
   const result = await callMoniBotAI('generate-reply', context);
-
-  const baseText = result || getRandomFallback(getTemplateTypeFromTx(tx));
+  const baseText = result || getRandomFallback(templateType);
 
   // Include shortened tx hash on success - no URLs, no @ mentions
   if (tx?.tx_hash && String(tx.tx_hash).startsWith('0x')) {
-    // Use "monitag: name" format (no @), shorten tx hash
     const recipientLabel = tx.recipient_pay_tag ? `monitag: ${tx.recipient_pay_tag}` : '';
     const shortHash = tx.tx_hash.substring(0, 18) + '...';
     const suffix = recipientLabel ? ` → ${recipientLabel}` : '';
