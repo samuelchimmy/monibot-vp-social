@@ -242,12 +242,21 @@ export async function generateReplyWithBackoff(tx) {
   }
 
   // For success cases, try AI for a more personalized reply
+  // Detect cross-chain reroute: if chain is 'base' but the tx was originally requested on BSC (or vice versa)
+  const txChain = tx.chain || 'base';
+  const token = txChain.toLowerCase() === 'bsc' ? 'USDT' : 'USDC';
+  const isRerouted = txChain.toLowerCase() !== 'base'; // Base bot handles base by default; if chain != base, it was rerouted
+  
   const context = {
     ...tx,
     recipient_tag: tx.recipient_pay_tag || 'unknown',
     payer_tag: tx.payer_pay_tag || 'MoniBot',
     type: tx.type || 'p2p_command',
     status: tx.status || 'completed',
+    chain: txChain,
+    token: token,
+    is_rerouted: isRerouted,
+    original_chain: isRerouted ? 'BSC' : '',
     template_type: templateType
   };
   
@@ -313,3 +322,4 @@ export async function generateWinnerAnnouncement({ winners, count, grantAmount, 
   const winnerList = winners.map(w => `@${w.payTag || w.username}`).join(', ');
   return `🎉 Congrats to our winners!\n\n${winnerList}\n\nEach getting $${grantAmount || 1.00} USDC! 🔵⚡`;
 }
+
