@@ -193,14 +193,20 @@ export async function processScheduledJobs() {
     await processReadyPendingJobs();
     
     // Get completed jobs that haven't been socially processed yet
-    // Use a raw filter to exclude jobs where result already has social_posted = true
-    const { data: jobs, error } = await supabase
+    // We fetch all completed jobs and filter in JS because Supabase JS client
+    // .not() on JSONB arrow operators excludes NULL values (SQL: NOT(NULL='true') → NULL → excluded)
+    const { data: allJobs, error } = await supabase
       .from('scheduled_jobs')
       .select('*')
       .eq('status', 'completed')
-      .not('result->>social_posted', 'eq', 'true')
       .order('completed_at', { ascending: true })
-      .limit(5);
+      .limit(20);
+    
+    // Filter in JS: keep jobs where social_posted is NOT true
+    const jobs = (allJobs || []).filter(j => {
+      const sp = j.result?.social_posted;
+      return sp !== true && sp !== 'true';
+    }).slice(0, 5);
     
     if (error) throw error;
     
