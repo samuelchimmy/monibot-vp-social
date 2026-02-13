@@ -342,7 +342,7 @@ async function processScheduledJob(job) {
  */
 async function handleCampaignPost(job) {
   const { payload } = job;
-  const { message, budget, grant_amount, max_participants } = payload;
+  const { message, budget, grant_amount, max_participants, network } = payload;
   
   // Use provided message, or generate a unique template-based tweet
   let tweetText = message;
@@ -353,15 +353,16 @@ async function handleCampaignPost(job) {
     tweetText = await generateUniqueCampaignTweet({
       budget,
       grantAmount: grant_amount,
-      maxParticipants: max_participants
+      maxParticipants: max_participants,
+      network: network || 'base'
     });
   }
   
   // Post the campaign tweet
   const tweetId = await postTweet(tweetText);
-  console.log(`   ✅ Campaign posted: ${tweetId}`);
+  console.log(`   ✅ Campaign posted: ${tweetId} (network: ${network || 'base'})`);
   
-  // Log campaign to database
+  // Log campaign to database with correct network
   await supabase.from('campaigns').insert({
     tweet_id: tweetId,
     message: tweetText,
@@ -370,7 +371,8 @@ async function handleCampaignPost(job) {
     grant_amount: grant_amount || 1.00,
     max_participants: max_participants || 5,
     budget_allocated: budget || (max_participants * grant_amount),
-    posted_at: new Date().toISOString()
+    posted_at: new Date().toISOString(),
+    network: network || 'base'
   });
   
   return tweetId;
