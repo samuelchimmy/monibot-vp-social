@@ -193,10 +193,12 @@ export async function processScheduledJobs() {
     await processReadyPendingJobs();
     
     // Get completed jobs that haven't been socially processed yet
+    // Use a raw filter to exclude jobs where result already has social_posted = true
     const { data: jobs, error } = await supabase
       .from('scheduled_jobs')
       .select('*')
       .eq('status', 'completed')
+      .not('result->>social_posted', 'eq', 'true')
       .order('completed_at', { ascending: true })
       .limit(5);
     
