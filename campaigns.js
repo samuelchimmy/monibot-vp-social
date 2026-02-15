@@ -41,7 +41,7 @@ let recentTemplateIndices = [];
  */
 function buildUniqueCampaignTweet(grantAmount, maxParticipants, network = 'base') {
   // Resolve token name from network
-  const token = network === 'bsc' ? 'USDT' : 'USDC';
+  const token = network === 'bsc' ? 'USDT' : network === 'tempo' ? 'AlphaUSD' : 'USDC';
 
   // Filter out recently used templates
   let available = CAMPAIGN_TEMPLATES
