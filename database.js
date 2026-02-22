@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { generateReplyWithBackoff, generateCampaignAnnouncement, generateWinnerAnnouncement } from './gemini.js';
-import { replyToTweet, postTweet } from './twitter-oauth2.js';
+import { replyToTweet, postTweet, twitterClient } from './twitter-oauth2.js';
 
 export let supabase;
 
@@ -26,7 +26,7 @@ export async function processSocialQueue() {
       .from('monibot_transactions')
       .select('*')
       .eq('replied', false)
-      .lt('retry_count', MAX_RETRY_COUNT) // Only get transactions under retry limit
+      .lt('retry_count', MAX_RETRY_COUNT)
       .order('created_at', { ascending: true })
       .limit(5);
     
@@ -40,6 +40,13 @@ export async function processSocialQueue() {
     console.log(`  Found ${queue.length} unreplied transaction(s)`);
     
     for (const tx of queue) {
+      // 🔴 FIX: Skip if this is MoniBot replying to itself
+      if (await shouldSkipSelfReply(tx)) {
+        console.log(`  ⏭️ Skipping self-reply: ${tx.id.substring(0, 8)}`);
+        await markAsReplied(tx.id, 'SKIPPED_SELF_REPLY_PROTECTION');
+        continue;
+      }
+      
       await processQueueItem(tx);
     }
     
@@ -49,6 +56,77 @@ export async function processSocialQueue() {
   } catch (error) {
     console.error('Error processing queue:', error);
   }
+}
+
+/**
+ * 🔴 FIX: Check if we should skip this transaction to prevent self-reply loops
+ * 
+ * LOGIC:
+ * - Campaign grants: ALLOW (user replied to campaign, we confirm grant)
+ * - P2P payments: ALLOW (user sent payment, we confirm)
+ * - MoniBot's own error tweets: BLOCK (don't reply to our own messages)
+ */
+async function shouldSkipSelfReply(tx) {
+  // WHITELIST: Always reply to these transaction types (user-initiated)
+  const safeTypes = [
+    'grant',
+    'campaign_grant', 
+    'p2p',
+    'payment',
+  ];
+  
+  // If it's a safe type, proceed with reply
+  if (safeTypes.includes(tx.type)) {
+    return false; // Don't skip
+  }
+  
+  // For other types, check if the original tweet is from MoniBot itself
+  if (!tx.tweet_id) {
+    return false; // No tweet to check, proceed
+  }
+  
+  try {
+    // Fetch the tweet to check its author
+    const tweet = await twitterClient.v2.singleTweet(tx.tweet_id, {
+      'tweet.fields': ['author_id', 'text']
+    });
+    
+    // Get MoniBot's own user ID
+    const me = await twitterClient.v2.me();
+    const myUserId = me.data.id;
+    
+    // If the tweet is from MoniBot itself, SKIP
+    if (tweet.data.author_id === myUserId) {
+      console.log(`  🚫 Tweet ${tx.tweet_id} is from MoniBot itself (${myUserId})`);
+      
+      // Extra check: is it an error/confirmation message?
+      const text = tweet.data.text.toLowerCase();
+      const isSelfMessage = 
+        text.includes('invalid') ||
+        text.includes('couldn\'t parse') ||
+        text.includes('check your monipay') ||
+        text.includes('transfer confirmed') ||
+        text.includes('payment complete') ||
+        text.includes('automated by');
+      
+      if (isSelfMessage) {
+        console.log(`  🚫 Detected self-generated message - blocking reply`);
+        return true; // Skip this
+      }
+    }
+    
+  } catch (twitterError) {
+    // If tweet lookup fails (403 = deleted/unavailable), skip it
+    if (twitterError.code === 403 || twitterError.data?.status === 403) {
+      console.log(`  🚫 Tweet unavailable (403) - skipping`);
+      return true;
+    }
+    
+    // For other errors, log but don't block (might be rate limit)
+    console.warn(`  ⚠️ Could not check tweet author: ${twitterError.message}`);
+  }
+  
+  return false; // Default: don't skip
 }
 
 async function processQueueItem(tx) {
@@ -93,7 +171,7 @@ async function processQueueItem(tx) {
     console.error(`   ❌ Error processing ${tx.id}:`, error.message);
     
     // Check if we should skip this transaction
-    if (shouldSkipTransaction(error)) {
+    if (shouldSkipTransactionError(error)) {
       console.log(`   ⚠️ Skipping transaction due to unrecoverable error`);
       await markAsReplied(tx.id, `SKIPPED_ERROR: ${error.message?.substring(0, 50)}`);
     } else {
@@ -144,7 +222,7 @@ async function cleanupExceededRetries() {
 /**
  * Determine if we should skip a transaction due to unrecoverable error
  */
-function shouldSkipTransaction(error) {
+function shouldSkipTransactionError(error) {
   const skipPatterns = [
     '403',
     'deleted',
